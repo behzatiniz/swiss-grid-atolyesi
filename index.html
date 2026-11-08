@@ -72,6 +72,14 @@ textarea{min-height:76px;resize:vertical;font-family:var(--f-ui)!important;font-
 #cv{display:block;box-shadow:0 2px 24px rgba(0,0,0,.28);touch-action:none;cursor:default;background:#fff}
 .zoombar{display:flex;align-items:center;gap:6px;padding:6px 10px;border-top:1px solid var(--ui-line);background:var(--ui-panel);font:12px var(--f-mono);flex-wrap:wrap}
 .zoombar .sp{flex:1}
+#pager{display:flex;align-items:center;gap:10px;padding:8px 10px;border-top:1px solid var(--ui-line);background:var(--ui-panel);min-width:0}
+#pager .pgnav{display:flex;align-items:center;gap:4px;flex:none;font:12px var(--f-mono)}
+#pager .pgn{min-width:84px;text-align:center}
+#pager .pgs{flex:1;display:flex;gap:8px;overflow-x:auto;padding:4px 2px;min-width:0;scroll-behavior:smooth}
+#pager .pgt{flex:none;display:flex;flex-direction:column;align-items:center;gap:2px;padding:3px;border:2px solid transparent;border-radius:4px;background:none;color:var(--ui-ink);font:10px var(--f-mono);cursor:pointer}
+#pager .pgt canvas{display:block;box-shadow:0 1px 4px rgba(0,0,0,.3);background:#fff}
+#pager .pgt.on{border-color:var(--ui-accent)}
+#pager .pgact{display:flex;gap:4px;flex:none}
 #layers{display:flex;flex-direction:column;border-top:1px solid var(--ui-line);max-height:34%;min-height:90px}
 #layers h3{margin:8px 12px 4px}
 #layerlist{overflow:auto;padding:0 8px 8px}
@@ -96,6 +104,8 @@ textarea{min-height:76px;resize:vertical;font-family:var(--f-ui)!important;font-
   #right{order:3;border-left:0;border-top:1px solid var(--ui-line)}
   .pane{max-height:none;overflow:visible}
   #stage{padding:14px}
+  #pager{flex-wrap:wrap;padding:8px 16px}
+  #pager .pgs{order:3;flex-basis:100%}
 }
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
@@ -134,6 +144,7 @@ textarea{min-height:76px;resize:vertical;font-family:var(--f-ui)!important;font-
 </aside>
 <section id="work">
   <div id="stage"><canvas id="cv" width="10" height="10"></canvas></div>
+  <div id="pager"></div>
   <div class="zoombar">
     <button class="btn sm" id="zOut">−</button>
     <span id="zVal">100%</span>
@@ -161,6 +172,12 @@ textarea{min-height:76px;resize:vertical;font-family:var(--f-ui)!important;font-
         <button class="chip" data-f="pdf">PDF</button>
         <button class="chip" data-f="svg">SVG</button>
         <button class="chip" data-f="json">Proje</button>
+      </div>
+    </div>
+    <div class="row" id="exScopeRow" hidden><label>Sayfalar</label>
+      <div class="chips" id="exScope">
+        <button class="chip on" data-a="1">Tüm sayfalar</button>
+        <button class="chip" data-a="0">Yalnız bu sayfa</button>
       </div>
     </div>
     <div class="row" id="exScaleRow"><label>Ölçek</label>
@@ -317,7 +334,7 @@ const S={
   page:{w:842,h:1191,name:'A3'},
   grid:{cols:4,rows:8,mt:48,mr:48,mb:48,ml:48,gut:16,base:0},
   T:JSON.parse(JSON.stringify(THEMES[0])),
-  els:[],sel:null,zoom:1,fit:true,
+  els:[],pages:[[]],cur:0,sel:null,zoom:1,fit:true,
   ui:{grid:true,snap:true},
   imgs:{}
 };
@@ -354,23 +371,25 @@ function eImage(r,o){return base('image',r,Object.assign({name:'Görsel',img:'',
 
 /* ---------- Geçmiş ve kayıt ---------- */
 const H={u:[],r:[]};
-function snapshot(){return JSON.stringify({page:S.page,grid:S.grid,T:S.T,els:S.els,sel:S.sel})}
+function syncPages(){S.pages[S.cur]=S.els}
+function snapshot(){syncPages();return JSON.stringify({page:S.page,grid:S.grid,T:S.T,pages:S.pages,cur:S.cur,sel:S.sel})}
 function commit(){
   const s=snapshot(); if(H.u.length&&H.u[H.u.length-1]===s)return;
   H.u.push(s); if(H.u.length>80)H.u.shift(); H.r=[]; saveSoon(); updHist();
 }
 function restore(s){
-  const o=JSON.parse(s); S.page=o.page;S.grid=o.grid;S.T=o.T;S.els=o.els;
+  const o=JSON.parse(s); S.page=o.page;S.grid=o.grid;S.T=o.T;S.pages=o.pages||[o.els||[]];S.cur=clamp(o.cur||0,0,S.pages.length-1);S.els=S.pages[S.cur];
   S.sel=o.sel&&S.els.some(e=>e.id===o.sel)?o.sel:null; fullRefresh();
 }
 function undo(){if(H.u.length<2)return;H.r.push(H.u.pop());restore(H.u[H.u.length-1]);updHist()}
 function redo(){if(!H.r.length)return;const s=H.r.pop();H.u.push(s);restore(s);updHist()}
 function updHist(){$('#bUndo').disabled=H.u.length<2;$('#bRedo').disabled=!H.r.length}
 let saveT=0;
-function saveSoon(){clearTimeout(saveT);saveT=setTimeout(save,500)}
+function saveSoon(){clearTimeout(saveT);saveT=setTimeout(save,500);if(typeof pagerSoon==='function')pagerSoon()}
 function projectJSON(withImgs,withFonts){
   const imgs={}; if(withImgs)for(const k in S.imgs)imgs[k]=S.imgs[k].url;
-  return JSON.stringify({v:1,page:S.page,grid:S.grid,T:S.T,els:S.els,ui:S.ui,imgs,fonts:withFonts?customFontsData():[],gfonts:withFonts?GF.map(g=>g.name):[]});
+  syncPages();
+  return JSON.stringify({v:2,page:S.page,grid:S.grid,T:S.T,els:S.els,pages:S.pages,cur:S.cur,ui:S.ui,imgs,fonts:withFonts?customFontsData():[],gfonts:withFonts?GF.map(g=>g.name):[]});
 }
 function save(){try{localStorage.setItem('sga.v1',projectJSON(true))}catch(e){try{localStorage.setItem('sga.v1',projectJSON(false))}catch(e2){}}}
 function toast(msg,ms){const t=$('#toast');t.textContent=msg;t.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>{t.hidden=true},ms||2400)}
@@ -1609,7 +1628,7 @@ function buildLayersLabel(){const r=$('.ly.sel .nm');const e=sel();if(r&&e)r.tex
 
 /* ---------- Genel yenileme ---------- */
 function refreshAll(){
-  buildPageUI(); buildThemeUI(); buildAddUI(); buildProps(); buildLayers();
+  buildPager(); buildPageUI(); buildThemeUI(); buildAddUI(); buildProps(); buildLayers();
   $('#bGrid').classList.toggle('on',S.ui.grid); $('#bSnap').classList.toggle('on',S.ui.snap);
   if(S.fit)fitZoom();
   updSizeInfo(); updHist(); needRender(); thumbsDirty();
@@ -1768,8 +1787,78 @@ function renderFontList(){
 }
 
 
+/* ---------- Çok sayfalı düzenleme ---------- */
+let pgLock=0;
+function goPage(i,dir){
+  syncPages(); i=clamp(i,0,S.pages.length-1); if(i===S.cur)return;
+  const d=dir||Math.sign(i-S.cur); S.cur=i; S.els=S.pages[i]; S.sel=null;
+  buildProps();buildLayers();needRender();buildPager();thumbsDirty();saveSoon();
+  try{cv.animate([{opacity:.2,transform:'translateX('+(d*48)+'px)'},{opacity:1,transform:'none'}],{duration:200,easing:'ease-out'})}catch(e){}
+}
+function addPage(copy){
+  syncPages();
+  const els=copy?JSON.parse(JSON.stringify(S.els)).map(e=>(e.id=nid(),e)):[];
+  S.pages.splice(S.cur+1,0,els); S.cur++; S.els=els; S.sel=null;
+  commit(); refreshAll();
+  toast(copy?'Sayfa çoğaltıldı ('+(S.cur+1)+' / '+S.pages.length+')':'Boş sayfa eklendi ('+(S.cur+1)+' / '+S.pages.length+')');
+}
+function delPage(){
+  syncPages();
+  if(S.pages.length<2){S.els=[];S.pages[0]=S.els;S.sel=null;commit();refreshAll();toast('Tek sayfa kaldı; içeriği temizlendi.');return}
+  S.pages.splice(S.cur,1); S.cur=Math.min(S.cur,S.pages.length-1); S.els=S.pages[S.cur]; S.sel=null;
+  commit(); refreshAll(); toast('Sayfa silindi. Ctrl/⌘+Z ile geri alınır.');
+}
+function movePage(d){
+  syncPages(); const j=S.cur+d; if(j<0||j>=S.pages.length)return;
+  const t=S.pages[S.cur]; S.pages[S.cur]=S.pages[j]; S.pages[j]=t; S.cur=j; S.els=S.pages[j];
+  commit(); refreshAll();
+}
+function drawThumb(cvs,els){
+  const x=cvs.getContext('2d'),k=cvs.width/S.page.w;
+  x.setTransform(k,0,0,k,0,0); const keepSel=ED; drawScene(x,els,{ed:false}); ED=keepSel;
+}
+function buildPager(){
+  const P=$('#pager'); if(!P)return; const old=P.querySelector('.pgs'), sl=old?old.scrollLeft:0; P.innerHTML='';
+  const n=S.pages.length, mk=(txt,title,fn,dis,cls)=>{const b=h('button',{class:'btn sm'+(cls?' '+cls:''),text:txt,type:'button',title});b.onclick=fn;b.disabled=!!dis;return b};
+  const nav=h('div',{class:'pgnav'});
+  nav.append(mk('‹','Önceki sayfa (PageUp)',()=>goPage(S.cur-1,-1),S.cur===0),h('span',{class:'pgn',text:'Sayfa '+(S.cur+1)+' / '+n}),mk('›','Sonraki sayfa (PageDown)',()=>goPage(S.cur+1,1),S.cur===n-1));
+  const strip=h('div',{class:'pgs'});
+  S.pages.forEach((els,i)=>{
+    const tw=Math.max(24,Math.round(56*S.page.w/S.page.h)), c=h('canvas',{width:tw*2,height:112});
+    c.style.width=tw+'px'; c.style.height='56px';
+    const b=h('button',{class:'pgt'+(i===S.cur?' on':''),type:'button',title:'Sayfa '+(i+1)}); b.append(c,h('span',{text:String(i+1)}));
+    b.onclick=()=>goPage(i);
+    strip.append(b); drawThumb(c,els);
+  });
+  const act=h('div',{class:'pgact'});
+  act.append(mk('＋ Boş','Yeni boş sayfa ekle',()=>addPage(false)),mk('⧉ Kopya','Bu sayfayı çoğalt',()=>addPage(true)),
+    mk('←','Sayfayı sola taşı',()=>movePage(-1),S.cur===0),mk('→','Sayfayı sağa taşı',()=>movePage(1),S.cur===n-1),mk('Sil','Sayfayı sil',delPage));
+  P.append(nav,strip,act); strip.scrollLeft=sl;
+  const on=strip.querySelector('.pgt.on'); if(on){const l=on.offsetLeft,r=l+on.offsetWidth; if(l<strip.scrollLeft)strip.scrollLeft=l-8; else if(r>strip.scrollLeft+strip.clientWidth)strip.scrollLeft=r-strip.clientWidth+8}
+}
+let pgT=0;
+function pagerSoon(){clearTimeout(pgT);pgT=setTimeout(()=>{const c=$$('#pager .pgt canvas')[S.cur];if(c){c.getContext('2d').setTransform(1,0,0,1,0,0);c.getContext('2d').clearRect(0,0,c.width,c.height);drawThumb(c,S.els)}},300)}
+
+/* Kaydırarak sayfa değiştirme: yatay kaydırma (iki parmak) ya da sığdırılmış sayfada dikey tekerlek */
+$('#stage').addEventListener('wheel',ev=>{
+  if(ev.ctrlKey||ev.metaKey||S.pages.length<2)return;
+  const st=$('#stage'), dx=ev.deltaX, dy=ev.deltaY, horiz=Math.abs(dx)>Math.abs(dy)*1.2, fitV=st.scrollHeight<=st.clientHeight+2&&st.scrollWidth<=st.clientWidth+2;
+  const d=horiz?dx:(fitV?dy:0); if(!d)return;
+  ev.preventDefault(); const now=performance.now();
+  if(now<pgLock){pgLock=now+160;return}
+  if(Math.abs(d)<12)return;
+  const dir=d>0?1:-1; if((dir>0&&S.cur>=S.pages.length-1)||(dir<0&&S.cur<=0)){pgLock=now+160;return}
+  pgLock=now+420; goPage(S.cur+dir,dir);
+},{passive:false});
+document.addEventListener('keydown',ev=>{
+  const tag=(ev.target.tagName||'').toLowerCase(); if(tag==='input'||tag==='textarea'||tag==='select'||!$('#mExport').hidden)return;
+  if(ev.key==='PageDown'){ev.preventDefault();goPage(S.cur+1,1)}
+  else if(ev.key==='PageUp'){ev.preventDefault();goPage(S.cur-1,-1)}
+});
+
+
 /* ---------- Dışa aktarma ---------- */
-const EX={fmt:'png',scale:2,q:92,trans:false};
+const EX={fmt:'png',scale:2,q:92,trans:false,all:true};
 const MAXSIDE=8192, MAXAREA=64e6;
 function exScale(){
   let s=EX.scale; const w=S.page.w, hh=S.page.h;
@@ -1779,12 +1868,13 @@ function exScale(){
 function exInfo(){
   const f=EX.fmt, s=exScale(), w=Math.round(S.page.w*s), hh=Math.round(S.page.h*s);
   $('#exScaleRow').hidden=!(f==='png'||f==='jpg'||f==='webp'||f==='pdf');
+  const mp=S.pages.length>1; $('#exScopeRow').hidden=!(mp&&f!=='json');
   $('#exQRow').hidden=!(f==='jpg'||f==='webp'||f==='pdf');
   $('#exTRow').hidden=!(f==='png'||f==='webp');
   let t='';
   if(f==='svg')t='Vektör çıktı. Şekiller vektör kalır, görseller ve desenler gömülü resim olur. Yazılar metin olarak kalır; yazı tiplerinin açan cihazda yüklü olması gerekir.';
-  else if(f==='json')t='Tüm öğeleri, ızgarayı, temayı ve yüklenen görselleri içeren proje dosyası. “Proje aç” ile geri yüklenir.';
-  else{t='Çıktı boyutu: '+w+' × '+hh+' px.';if(s<EX.scale-.01)t+=' Ölçek tarayıcı sınırı nedeniyle düşürüldü.';
+  else if(f==='json')t='Tüm sayfaları, öğeleri, ızgarayı, temayı ve yüklenen görselleri içeren proje dosyası. “Proje aç” ile geri yüklenir.';
+  else{t='Çıktı boyutu: '+w+' × '+hh+' px'+(mp&&EX.all?' · '+S.pages.length+' sayfa'+(f==='pdf'?' tek PDF dosyası olur.':' ayrı dosya olarak iner.'):'.');if(s<EX.scale-.01)t+=' Ölçek tarayıcı sınırı nedeniyle düşürüldü.';
     if(f==='pdf')t+=' PDF sayfası '+r2(S.page.w)+' × '+r2(S.page.h)+' pt; içerik yüksek çözünürlüklü resim olarak gömülür.'}
   if(f==='webp'||f==='png')t+=EX.trans?' Zemin saydam.':'';
   $('#exInfo').textContent=t;
@@ -1797,11 +1887,12 @@ $('#mExport').addEventListener('pointerdown',ev=>{if(ev.target.id==='mExport')cl
 document.addEventListener('keydown',ev=>{if(ev.key==='Escape'&&!$('#mExport').hidden)closeExport()});
 $$('#exFmt .chip').forEach(b=>b.onclick=()=>{EX.fmt=b.dataset.f;$$('#exFmt .chip').forEach(x=>x.classList.toggle('on',x===b));exInfo()});
 $$('#exScale .chip').forEach(b=>b.onclick=()=>{EX.scale=+b.dataset.s;$$('#exScale .chip').forEach(x=>x.classList.toggle('on',x===b));exInfo()});
+$$('#exScope .chip').forEach(b=>b.onclick=()=>{EX.all=b.dataset.a==='1';$$('#exScope .chip').forEach(x=>x.classList.toggle('on',x===b));exInfo()});
 $('#exQ').oninput=ev=>{EX.q=+ev.target.value;$('#exQo').textContent=EX.q};
 $('#exTrans').onchange=ev=>{EX.trans=ev.target.checked;exInfo()};
 
 async function loadFontsForExport(){
-  const jobs=[]; S.els.forEach(e=>{if(e.type==='text'){const f=fontOf(e);jobs.push(document.fonts.load((e.ital?'italic ':'')+e.weight+' 24px "'+f+'"'))}});
+  const jobs=[]; syncPages();S.pages.forEach(pg=>pg.forEach(e=>{if(e.type==='text'){const f=fontOf(e);jobs.push(document.fonts.load((e.ital?'italic ':'')+e.weight+' 24px "'+f+'"'))}}));
   try{await Promise.all(jobs);await document.fonts.ready}catch(err){}
   fitCache={};
 }
@@ -1844,23 +1935,28 @@ function buildSVG(){
   });
   out.push('</svg>'); return out.join('\n');
 }
-async function makePDF(jpg,pw,ph,iw,ih){
-  const data=new Uint8Array(await jpg.arrayBuffer()), enc=new TextEncoder(), parts=[], off=[]; let pos=0;
+async function makePDF(pgs,pw,ph){
+  /* pgs: [{jpg:Blob,iw,ih}] — her sayfa ayrı PDF sayfası */
+  const enc=new TextEncoder(), parts=[], off=[]; let pos=0; const N=pgs.length;
   const push=u=>{parts.push(u);pos+=u.length}, str=s=>push(enc.encode(s));
   const obj=(n,b)=>{off[n]=pos;str(n+' 0 obj\n'+b+'\nendobj\n')};
   str('%PDF-1.4\n');
   obj(1,'<< /Type /Catalog /Pages 2 0 R >>');
-  obj(2,'<< /Type /Pages /Kids [3 0 R] /Count 1 >>');
-  obj(3,'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 '+pw+' '+ph+'] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>');
-  off[4]=pos; str('4 0 obj\n<< /Type /XObject /Subtype /Image /Width '+iw+' /Height '+ih+' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length '+data.length+' >>\nstream\n');
-  push(data); str('\nendstream\nendobj\n');
-  const content='q '+pw+' 0 0 '+ph+' 0 0 cm /Im0 Do Q';
-  obj(5,'<< /Length '+content.length+' >>\nstream\n'+content+'\nendstream');
-  const xr=pos; let x='xref\n0 6\n0000000000 65535 f \n';
-  for(let i=1;i<=5;i++)x+=String(off[i]).padStart(10,'0')+' 00000 n \n';
-  str(x+'trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n'+xr+'\n%%EOF');
+  obj(2,'<< /Type /Pages /Kids ['+pgs.map((p,i)=>(3+i*3)+' 0 R').join(' ')+'] /Count '+N+' >>');
+  for(let i=0;i<N;i++){
+    const data=new Uint8Array(await pgs[i].jpg.arrayBuffer()), n=3+i*3;
+    obj(n,'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 '+pw+' '+ph+'] /Resources << /XObject << /Im0 '+(n+1)+' 0 R >> >> /Contents '+(n+2)+' 0 R >>');
+    off[n+1]=pos; str((n+1)+' 0 obj\n<< /Type /XObject /Subtype /Image /Width '+pgs[i].iw+' /Height '+pgs[i].ih+' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length '+data.length+' >>\nstream\n');
+    push(data); str('\nendstream\nendobj\n');
+    const content='q '+pw+' 0 0 '+ph+' 0 0 cm /Im0 Do Q';
+    obj(n+2,'<< /Length '+content.length+' >>\nstream\n'+content+'\nendstream');
+  }
+  const total=3+N*3, xr=pos; let x='xref\n0 '+total+'\n0000000000 65535 f \n';
+  for(let i=1;i<total;i++)x+=String(off[i]).padStart(10,'0')+' 00000 n \n';
+  str(x+'trailer\n<< /Size '+total+' /Root 1 0 R >>\nstartxref\n'+xr+'\n%%EOF');
   return new Blob(parts,{type:'application/pdf'});
 }
+function onPage(i,fn){syncPages();const keep=S.els;S.els=S.pages[i];try{return fn()}finally{S.els=keep}}
 let DL;
 async function getDL(){
   if(DL!==undefined)return DL;
@@ -1878,20 +1974,27 @@ async function saveFile(name,blob){
   setTimeout(()=>URL.revokeObjectURL(url),5000); toast('İndirildi: '+name);
 }
 $('#exGo').onclick=async()=>{
-  const go=$('#exGo'); go.disabled=true; const f=EX.fmt, base='swiss-grid-'+S.page.w+'x'+S.page.h;
+  const go=$('#exGo'); go.disabled=true; const f=EX.fmt, base0='swiss-grid-'+S.page.w+'x'+S.page.h;
   try{
-    if(f==='json'){await saveFile(base+'.json',new Blob([projectJSON(true,true)],{type:'application/json'}))}
+    syncPages();
+    const idx=(EX.all&&S.pages.length>1)?S.pages.map((_,i)=>i):[S.cur], multi=idx.length>1;
+    const nm=(i,ext)=>base0+(multi?'-'+String(i+1).padStart(2,'0'):'')+'.'+ext;
+    if(f==='json'){await saveFile(base0+'.json',new Blob([projectJSON(true,true)],{type:'application/json'}))}
     else{
       await loadFontsForExport();
-      if(f==='svg')await saveFile(base+'.svg',new Blob([buildSVG()],{type:'image/svg+xml'}));
-      else{
-        const s=exScale(), q=EX.q/100;
-        if(f==='png'){const c=renderCanvas(s,EX.trans);await saveFile(base+'.png',await toBlob(c,'image/png'))}
-        else if(f==='jpg'){const c=renderCanvas(s,false);await saveFile(base+'.jpg',await toBlob(c,'image/jpeg',q))}
-        else if(f==='webp'){const c=renderCanvas(s,EX.trans);const b=await toBlob(c,'image/webp',q);
-          if(b&&b.type==='image/webp')await saveFile(base+'.webp',b);else toast('Bu tarayıcı WebP üretemiyor. PNG veya JPG seçin.',4000)}
-        else if(f==='pdf'){const c=renderCanvas(s,false);const jb=await toBlob(c,'image/jpeg',Math.max(q,.85));
-          await saveFile(base+'.pdf',await makePDF(jb,r2(S.page.w),r2(S.page.h),c.width,c.height))}
+      const s=exScale(), q=EX.q/100;
+      if(f==='pdf'){
+        const pgs=[];
+        for(const i of idx){const c=onPage(i,()=>renderCanvas(s,false));pgs.push({jpg:await toBlob(c,'image/jpeg',Math.max(q,.85)),iw:c.width,ih:c.height})}
+        await saveFile(base0+(multi?'-'+idx.length+'-sayfa':'')+'.pdf',await makePDF(pgs,r2(S.page.w),r2(S.page.h)));
+      }else{
+        for(const i of idx){
+          if(f==='svg')await saveFile(nm(i,'svg'),new Blob([onPage(i,buildSVG)],{type:'image/svg+xml'}));
+          else if(f==='png'){const c=onPage(i,()=>renderCanvas(s,EX.trans));await saveFile(nm(i,'png'),await toBlob(c,'image/png'))}
+          else if(f==='jpg'){const c=onPage(i,()=>renderCanvas(s,false));await saveFile(nm(i,'jpg'),await toBlob(c,'image/jpeg',q))}
+          else if(f==='webp'){const c=onPage(i,()=>renderCanvas(s,EX.trans));const b=await toBlob(c,'image/webp',q);
+            if(b&&b.type==='image/webp')await saveFile(nm(i,'webp'),b);else{toast('Bu tarayıcı WebP üretemiyor. PNG veya JPG seçin.',4000);break}}
+        }
       }
     }
   }catch(err){toast('Dışa aktarma başarısız: '+(err&&err.message||err),5000)}
@@ -1900,9 +2003,9 @@ $('#exGo').onclick=async()=>{
 
 /* ---------- Proje yükleme ---------- */
 function loadProject(o,done){
-  S.page=o.page; S.grid=Object.assign({base:0,mt:48,mr:48,mb:48,ml:48,gut:16},o.grid); S.T=o.T; S.els=o.els||[];
+  S.page=o.page; S.grid=Object.assign({base:0,mt:48,mr:48,mb:48,ml:48,gut:16},o.grid); S.T=o.T; S.pages=(o.pages&&o.pages.length)?o.pages:[o.els||[]]; S.cur=clamp(o.cur||0,0,S.pages.length-1); S.els=S.pages[S.cur];
   S.ui=Object.assign({grid:true,snap:true},o.ui||{}); S.sel=null; S.imgs={};
-  uidN=1+S.els.reduce((m,e)=>Math.max(m,parseInt(String(e.id).slice(1),10)||0),0);
+  uidN=1+S.pages.reduce((a,pg)=>pg.reduce((m,e)=>Math.max(m,parseInt(String(e.id).slice(1),10)||0),a),0);
   const ids=Object.keys(o.imgs||{}); let n=ids.length;
   const fin2=()=>loadFontsFrom(o).then(done,done);
   if(!n){fin2();return}
@@ -1933,7 +2036,7 @@ $('#zFit').onclick=()=>{fitZoom();needRender()};
 let newArm=0;
 $('#bNew').onclick=()=>{
   const b=$('#bNew');
-  if(!newArm){newArm=setTimeout(()=>{newArm=0;b.textContent='Yeni';b.classList.remove('pri')},3000);b.textContent='Sayfa silinsin mi?';b.classList.add('pri');return}
+  if(!newArm){newArm=setTimeout(()=>{newArm=0;b.textContent='Yeni';b.classList.remove('pri')},3000);b.textContent='Bu sayfa temizlensin mi?';b.classList.add('pri');return}
   clearTimeout(newArm);newArm=0;b.textContent='Yeni';b.classList.remove('pri');
   S.els=[];S.sel=null;commit();refreshAll();
 };
@@ -1948,7 +2051,7 @@ if(document.fonts&&document.fonts.ready)document.fonts.ready.then(()=>{fitCache=
   let saved=null; try{saved=JSON.parse(localStorage.getItem('sga.v1')||'null')}catch(err){}
   const start=()=>{commit();fitZoom();refreshAll()};
   if(saved&&saved.page&&saved.els&&saved.T){try{loadProject(saved,start);return}catch(err){}}
-  S.els=COMPS[0].make(); start();
+  S.els=COMPS[0].make(); S.pages=[S.els]; S.cur=0; start();
   }
 })();
 })();
